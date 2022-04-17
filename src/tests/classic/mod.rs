@@ -1,2 +1,2 @@
-mod run;
 mod smoke;
+mod run;

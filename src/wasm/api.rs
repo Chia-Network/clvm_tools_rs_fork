@@ -9,7 +9,9 @@ use wasm_bindgen::prelude::*;
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
-struct Runner {}
+struct Runner {
+    
+}
 
 lazy_static! {
     static ref next_id: AtomicUsize = {
@@ -25,11 +27,13 @@ lazy_static! {
  */
 #[wasm_bindgen]
 pub fn create_clvm_runner(program: &[u8], args: &[u8]) -> i32 {
+    
     return 0;
 }
 
 #[wasm_bindgen]
-pub fn remove_clvm_runner(runner: i32) {}
+pub fn remove_clvm_runner(runner: i32) {
+}
 
 // Run until the given step, returning the current machine state.
 #[wasm_bindgen]
