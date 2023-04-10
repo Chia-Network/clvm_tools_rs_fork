@@ -1,5 +1,5 @@
 # Thanks: clvm_rs' github actions.
-name: Run Mac, Linux, and Windows tests and build Wheels
+name: Verify recompilation and binary output for ChiaLisp21
 
 on:
   push:
@@ -14,13 +14,13 @@ on:
 
 jobs:
   build_wheels:
-    name: Build wheels and run Cargo tests on ${{ matrix.os }} py-${{ matrix.python }}
+    name: Verify recompilation and binary output for ChiaLisp21 on ${{ matrix.os }} py-${{ matrix.python }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
-        python: [3.7, 3.8, 3.9, '3.10']
+        os: [ubuntu-latest]
+        python: ['3.10']
 
     steps:
     - uses: actions/checkout@v3
@@ -133,23 +133,24 @@ jobs:
         python -c 'import clvm_rs; print(clvm_rs.__file__)'
         python -c 'import clvm_tools_rs; print(clvm_tools_rs.__file__)'
 
+    - name: Verify recompilation of cl21 sources
+      if: startsWith(matrix.os, 'ubuntu') && startsWith(matrix.python, '3.7')
+      run: |
+        . ./activate
+        # We need chia-rs for the following.
+        pip install chia-rs
+        # Ensure we're using the sources we have.  This is a hedge against
+        # changes made by any other step doing operations on pip.
+        # This script installs the wheel built during this workflow.
+        python support/wheelname.py
+        (cd resources/tests && python check-recompiles.py)
+
     - name: Run tests from clvm
       run: |
         . ./activate
         cd clvm
         pip install pytest pytest-asyncio
         pytest tests
-
-    - name: Run cargo tests
-      if: startsWith(matrix.os, 'ubuntu') && startsWith(matrix.python, '3.7')
-      run: cargo test --no-default-features
-
-    - name: Check coverage
-      if: startsWith(matrix.os, 'ubuntu') && startsWith(matrix.python, '3.7')
-      run: |
-        cargo install grcov
-        rustup component add llvm-tools-preview
-        python ./resources/coverage/run_coverage.py --require-percent 60
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v3
@@ -212,7 +213,7 @@ jobs:
           toolchain: stable
           components: clippy
           override: true
-      - name: clippy
+      - name: clippy on ${{ matrix.os }} py-${{ matrix.python }}
         run: cargo clippy --all -- -D warnings
       - uses: actions-rs/clippy-check@v1
         with:
@@ -233,4 +234,3 @@ jobs:
             components: rustfmt, clippy
       - name: cargo test
         run: cargo test
-

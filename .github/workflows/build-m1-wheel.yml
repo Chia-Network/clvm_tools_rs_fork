@@ -34,6 +34,7 @@ jobs:
       run: |
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rust.sh
         arch -arm64 sh rust.sh -y
+        source "$HOME/.cargo/env"
 
     - name: Build m1 wheels
       run: |
@@ -82,12 +83,14 @@ jobs:
 #        cd clvm
 #        arch -arm64 python -m py.test tests
 
-    - name: Run tests from clvm_tools
+    - name: Run tests from clvm_tools_rs
       continue-on-error: true
       run: |
+        echo "PWD: $(pwd)"
+        echo "LS: $(ls)"
         . ./venv/bin/activate
-        cd clvm_tools_rs
-        arch -arm64 cargo test
+        sleep 3
+        arch -arm64 cargo test --no-default-features
 
     - name: Upload wheels
       uses: actions/upload-artifact@v3

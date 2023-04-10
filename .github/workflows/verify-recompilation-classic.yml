@@ -1,5 +1,5 @@
 # Thanks: clvm_rs' github actions.
-name: Run Mac, Linux, and Windows tests and build Wheels
+name: Verify recompilation and binary output for classic clvm compiler
 
 on:
   push:
@@ -14,13 +14,13 @@ on:
 
 jobs:
   build_wheels:
-    name: Build wheels and run Cargo tests on ${{ matrix.os }} py-${{ matrix.python }}
+    name: Verify recompilation and binary output for classic clvm compiler on ${{ matrix.os }} py-${{ matrix.python }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
-        python: [3.7, 3.8, 3.9, '3.10']
+        os: [ubuntu-latest]
+        python: ['3.10']
 
     steps:
     - uses: actions/checkout@v3
@@ -133,23 +133,27 @@ jobs:
         python -c 'import clvm_rs; print(clvm_rs.__file__)'
         python -c 'import clvm_tools_rs; print(clvm_tools_rs.__file__)'
 
+    - name: Verify recompilation of old sources match
+      if: startsWith(matrix.os, 'ubuntu') && startsWith(matrix.python, '3.7')
+      run: |
+        . ./activate
+        # Build cmd line tools
+        PYO3_PYTHON=`which python` cargo build --no-default-features --release
+
+        # Grab chia-blockchain
+        rm -rf chia-blockchain
+        git clone https://github.com/Chia-Network/chia-blockchain
+
+        # Check recompiles
+        cp support/recompile_check.py chia-blockchain
+        (cd chia-blockchain && python recompile_check.py)
+
     - name: Run tests from clvm
       run: |
         . ./activate
         cd clvm
         pip install pytest pytest-asyncio
         pytest tests
-
-    - name: Run cargo tests
-      if: startsWith(matrix.os, 'ubuntu') && startsWith(matrix.python, '3.7')
-      run: cargo test --no-default-features
-
-    - name: Check coverage
-      if: startsWith(matrix.os, 'ubuntu') && startsWith(matrix.python, '3.7')
-      run: |
-        cargo install grcov
-        rustup component add llvm-tools-preview
-        python ./resources/coverage/run_coverage.py --require-percent 60
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v3
@@ -233,4 +237,3 @@ jobs:
             components: rustfmt, clippy
       - name: cargo test
         run: cargo test
-
