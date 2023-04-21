@@ -11,6 +11,9 @@ on:
     branches:
       - '**'
 
+env:
+  IMAGE_REGISTRY: ghcr.io/chia-network/build-images
+
 jobs:
   build_wheels:
     name: ARM64 Python Wheels on ubuntu-latest
@@ -32,15 +35,20 @@ jobs:
       with:
         platforms: arm64
 
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+
     - name: Build Python wheels
       run: |
         podman run --rm=true \
           -v ${{ github.workspace }}:/ws:rw --workdir=/ws \
-          quay.io/pypa/manylinux2014_aarch64 \
+          ${{ env.IMAGE_REGISTRY }}/centos-pypa-rust-aarch64:latest \
           bash -exc '\
             echo $PATH && \
-            curl -L https://sh.rustup.rs > rustup-init.sh && \
-            sh rustup-init.sh -y && \
             yum -y install openssl-devel && \
             source $HOME/.cargo/env && \
             rustup target add aarch64-unknown-linux-musl && \
