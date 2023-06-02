@@ -274,7 +274,7 @@ Then we can match the variables to the given args and substitute numbers otherwi
       (sloppy quadratic (A B C X) X 65 A 44)
       )
     
-And we can run that `brun macro_prog.clsp '(99 77)'`:
+And we can run that `brun macro_prog.clvm '(99 77)'`:
 
     0x090894
     
