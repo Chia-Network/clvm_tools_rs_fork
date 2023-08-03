@@ -1182,7 +1182,6 @@ pub fn launch_tool(stdout: &mut Stream, args: &[String], tool_name: &str, defaul
         })
         .unwrap_or_else(|| "main.sym".to_string());
 
-    // In testing: short circuit for modern compilation.
     if let Some(dialect) = dialect {
         let do_optimize = parsed_args
             .get("optimize")
