@@ -42,7 +42,7 @@ The compiled form of this program is:
     (c 2 (c (+ 2 (q . 1)) (q 22322)))
     
 Due to its use of native CLVM values, chialisp guesses at how to represent atoms,
-representing the short atom X2 as 22578, which is bitwise equivalent at the CLVM
+representing the short atom W2 as 22578, which is bitwise equivalent at the CLVM
 level.  Compare to this correct classic chialisp program:
 
     (mod (W) (list W (+ W 1) 22322))
@@ -59,7 +59,7 @@ chialisp in depth).
 
 So what do modern `defmac` macros do?
 
-In short, they run in a VM environment where "X" is a different value from W and
+In short, they run in a VM environment where "W" is a different value from W and
 87.  Some operators treat them equivalently, but they aren't the same.  We also
 introduce new operators in this environment that allow us to query and act on these
 values.
