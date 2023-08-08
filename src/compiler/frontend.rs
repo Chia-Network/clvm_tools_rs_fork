@@ -518,6 +518,7 @@ fn compile_defmacro(
             name,
             args: args.clone(),
             program: Rc::new(p),
+            advanced: false,
         })
     })
 }
@@ -606,7 +607,7 @@ pub fn compile_helperform(
                 matched.args,
             )
             .map(Some)
-        } else if matched.op_name == b"defmacro" {
+        } else if matched.op_name == b"defmacro" || matched.op_name == b"defmac" {
             compile_defmacro(
                 opts,
                 l,

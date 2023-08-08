@@ -38,8 +38,9 @@ pub fn write_sym_output(
         .map(|_| ())
 }
 
-pub fn compile_clvm_text(
+pub fn compile_clvm_text_maybe_opt(
     allocator: &mut Allocator,
+    do_optimize: bool,
     opts: Rc<dyn CompilerOpts>,
     symbol_table: &mut HashMap<String, String>,
     text: &str,
@@ -48,13 +49,15 @@ pub fn compile_clvm_text(
 ) -> Result<NodePtr, EvalErr> {
     let ir_src = read_ir(text).map_err(|s| EvalErr(allocator.null(), s.to_string()))?;
     let assembled_sexp = assemble_from_ir(allocator, Rc::new(ir_src))?;
-
     let dialect = detect_modern(allocator, assembled_sexp);
     // Now the stepping is optional (None for classic) but we may communicate
     // other information in dialect as well.
-    if let Some(dialect) = dialect.stepping {
+    if let Some(stepping) = dialect.stepping {
         let runner = Rc::new(DefaultProgramRunner::new());
-        let opts = opts.set_optimize(true).set_frontend_opt(dialect > 21);
+        let opts = opts
+            .set_dialect(dialect)
+            .set_optimize(do_optimize)
+            .set_frontend_opt(stepping > 21);
 
         let unopt_res = compile_file(allocator, runner.clone(), opts, text, symbol_table);
         let res = unopt_res.and_then(|x| run_optimizer(allocator, runner, Rc::new(x)));
@@ -77,6 +80,25 @@ pub fn compile_clvm_text(
             run_program.run_program(allocator, compile_invoke_code, input_sexp, None)?;
         Ok(run_program_output.1)
     }
+}
+
+pub fn compile_clvm_text(
+    allocator: &mut Allocator,
+    opts: Rc<dyn CompilerOpts>,
+    symbol_table: &mut HashMap<String, String>,
+    text: &str,
+    input_path: &str,
+    classic_with_opts: bool,
+) -> Result<NodePtr, EvalErr> {
+    compile_clvm_text_maybe_opt(
+        allocator,
+        true,
+        opts,
+        symbol_table,
+        text,
+        input_path,
+        classic_with_opts,
+    )
 }
 
 pub fn compile_clvm_inner(

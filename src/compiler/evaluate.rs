@@ -9,7 +9,7 @@ use clvm_rs::allocator::Allocator;
 use crate::classic::clvm::__type_compatibility__::{bi_one, bi_zero};
 use crate::classic::clvm_tools::stages::stage_0::TRunProgram;
 
-use crate::compiler::clvm::run;
+use crate::compiler::clvm::{run, PrimOverride};
 use crate::compiler::codegen::codegen;
 use crate::compiler::compiler::is_at_capture;
 use crate::compiler::comptypes::{
@@ -18,7 +18,7 @@ use crate::compiler::comptypes::{
 };
 use crate::compiler::frontend::frontend;
 use crate::compiler::runtypes::RunFailure;
-use crate::compiler::sexp::SExp;
+use crate::compiler::sexp::{enlist, SExp};
 use crate::compiler::srcloc::Srcloc;
 use crate::compiler::stackvisit::{HasDepthLimit, VisitedMarker};
 use crate::util::{number_from_u8, u8_from_number, Number};
@@ -65,10 +65,48 @@ impl<'info> VisitedInfoAccess for VisitedMarker<'info, VisitedInfo> {
 
 // Frontend evaluator based on my fuzzer representation and direct interpreter of
 // that.
+
 #[derive(Debug)]
 pub enum ArgInputs {
     Whole(Rc<BodyForm>),
     Pair(Rc<ArgInputs>, Rc<ArgInputs>),
+}
+
+/// EvalExtension provides internal capabilities to the evaluator that function
+/// as extra primitives.  They work entirely at the semantic layer of chialisp
+/// and are preferred compared to CLVM primitives.  These operate on BodyForm
+/// so they have some ability to work on the semantics of chialisp values in
+/// addition to reified values.
+///
+/// These provide the primitive, value aware capabilities to the defmac system
+/// which runs entirely in evaluator space.  This is done because evaluator deals
+/// in high level frontend values...  Rather than having integers, symbols and
+/// strings all crushed into a single atom value space, these observe the
+/// differences and are able to judge and convert them in ways the user specifies.
+///
+/// This allows these macros to pass on programs to the chialisp compiler that
+/// are symbol and constant aware; it's able to write (for example) a matcher
+/// that takes lists of mixed symbols and constants, isolate each and produce
+/// lists of let bindings and match checks that pick out each.  Since atoms are
+/// passed on when appropriate vs constants and such, we can have macros produce
+/// code and be completely certain that any atom landing in the chialisp compiler
+/// was intended to be bound in some way and return an error if it isn't, having
+/// the result plainly be an error if not.
+///
+/// I also anticipate using EvalExtensions to analyze and control code shrinking
+/// during some kinds of optimization.
+pub trait EvalExtension {
+    #[allow(clippy::too_many_arguments)]
+    fn try_eval(
+        &self,
+        evaluator: &Evaluator,
+        prog_args: Rc<SExp>,
+        env: &HashMap<Vec<u8>, Rc<BodyForm>>,
+        loc: &Srcloc,
+        name: &[u8],
+        args: &[Rc<BodyForm>],
+        body: Rc<BodyForm>,
+    ) -> Result<Option<Rc<BodyForm>>, CompileErr>;
 }
 
 /// Evaluator is an object that simplifies expressions, given the helpers
@@ -91,9 +129,65 @@ pub struct Evaluator {
     opts: Rc<dyn CompilerOpts>,
     runner: Rc<dyn TRunProgram>,
     prims: Rc<HashMap<Vec<u8>, Rc<SExp>>>,
+    extensions: Vec<Rc<dyn EvalExtension>>,
     helpers: Vec<HelperForm>,
     mash_conditions: bool,
     ignore_exn: bool,
+}
+
+fn compile_to_run_err(e: CompileErr) -> RunFailure {
+    match e {
+        CompileErr(l, e) => RunFailure::RunErr(l, e),
+    }
+}
+
+impl PrimOverride for Evaluator {
+    fn try_handle(
+        &self,
+        head: Rc<SExp>,
+        _context: Rc<SExp>,
+        tail: Rc<SExp>,
+    ) -> Result<Option<Rc<SExp>>, RunFailure> {
+        let have_args: Vec<Rc<BodyForm>> = if let Some(args_list) = tail.proper_list() {
+            args_list
+                .iter()
+                .map(|e| Rc::new(BodyForm::Quoted(e.clone())))
+                .collect()
+        } else {
+            return Ok(None);
+        };
+
+        if let SExp::Atom(hl, head_atom) = head.borrow() {
+            let mut call_args = vec![Rc::new(BodyForm::Value(SExp::Atom(
+                hl.clone(),
+                head_atom.clone(),
+            )))];
+            call_args.append(&mut have_args.clone());
+            // Primitives can't have tails.
+            let call_form = Rc::new(BodyForm::Call(head.loc(), call_args, None));
+
+            for x in self.extensions.iter() {
+                if let Some(res) = x
+                    .try_eval(
+                        self,
+                        Rc::new(SExp::Nil(head.loc())),
+                        &HashMap::new(),
+                        &head.loc(),
+                        head_atom,
+                        &have_args,
+                        call_form.clone(),
+                    )
+                    .map_err(compile_to_run_err)?
+                {
+                    return dequote(head.loc(), res)
+                        .map_err(compile_to_run_err)
+                        .map(Some);
+                }
+            }
+        }
+
+        Ok(None)
+    }
 }
 
 fn select_helper(bindings: &[HelperForm], name: &[u8]) -> Option<HelperForm> {
@@ -170,7 +264,7 @@ fn get_bodyform_from_arginput(l: &Srcloc, arginput: &ArgInputs) -> Rc<BodyForm> 
 //
 // It's possible this will result in irreducible (unknown at compile time)
 // argument expressions.
-fn create_argument_captures(
+pub fn create_argument_captures(
     argument_captures: &mut HashMap<Vec<u8>, Rc<BodyForm>>,
     formed_arguments: &ArgInputs,
     function_arg_spec: Rc<SExp>,
@@ -267,7 +361,7 @@ fn arg_inputs_primitive(arginputs: Rc<ArgInputs>) -> bool {
     }
 }
 
-fn build_argument_captures(
+pub fn build_argument_captures(
     l: &Srcloc,
     arguments_to_convert: &[Rc<BodyForm>],
     tail: Option<Rc<BodyForm>>,
@@ -599,6 +693,7 @@ impl<'info> Evaluator {
             helpers,
             mash_conditions: false,
             ignore_exn: false,
+            extensions: Vec::new(),
         }
     }
 
@@ -608,6 +703,7 @@ impl<'info> Evaluator {
             runner: self.runner.clone(),
             prims: self.prims.clone(),
             helpers: self.helpers.clone(),
+            extensions: self.extensions.clone(),
             mash_conditions: true,
             ignore_exn: true,
         }
@@ -668,6 +764,34 @@ impl<'info> Evaluator {
         }
     }
 
+    fn defmac_ordering(&self) -> bool {
+        let dialect = self.opts.dialect();
+        dialect.strict || dialect.stepping.unwrap_or(21) > 22
+    }
+
+    fn make_com_module(&self, l: &Srcloc, prog_args: Rc<SExp>, body: Rc<SExp>) -> Rc<SExp> {
+        let end_of_list = if self.defmac_ordering() {
+            let mut mod_list: Vec<Rc<SExp>> = self.helpers.iter().map(|h| h.to_sexp()).collect();
+            mod_list.push(body);
+            Rc::new(enlist(l.clone(), &mod_list))
+        } else {
+            let mut end_of_list =
+                Rc::new(SExp::Cons(l.clone(), body, Rc::new(SExp::Nil(l.clone()))));
+
+            for h in self.helpers.iter() {
+                end_of_list = Rc::new(SExp::Cons(l.clone(), h.to_sexp(), end_of_list));
+            }
+
+            end_of_list
+        };
+
+        Rc::new(SExp::Cons(
+            l.clone(),
+            Rc::new(SExp::Atom(l.clone(), "mod".as_bytes().to_vec())),
+            Rc::new(SExp::Cons(l.clone(), prog_args, end_of_list)),
+        ))
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn invoke_primitive(
         &self,
@@ -690,23 +814,9 @@ impl<'info> Evaluator {
                 prog_args,
             ))))
         } else if call.name == "com".as_bytes() {
-            let mut end_of_list = Rc::new(SExp::Cons(
-                call.loc.clone(),
-                arguments_to_convert[0].to_sexp(),
-                Rc::new(SExp::Nil(call.loc.clone())),
-            ));
-
-            for h in self.helpers.iter() {
-                end_of_list = Rc::new(SExp::Cons(call.loc.clone(), h.to_sexp(), end_of_list))
-            }
-
-            let use_body = SExp::Cons(
-                call.loc.clone(),
-                Rc::new(SExp::Atom(call.loc.clone(), "mod".as_bytes().to_vec())),
-                Rc::new(SExp::Cons(call.loc.clone(), prog_args, end_of_list)),
-            );
-
-            let compiled = self.compile_code(allocator, false, Rc::new(use_body))?;
+            let use_body =
+                self.make_com_module(&call.loc, prog_args, arguments_to_convert[0].to_sexp());
+            let compiled = self.compile_code(allocator, false, use_body)?;
             let compiled_borrowed: &SExp = compiled.borrow();
             Ok(Rc::new(BodyForm::Quoted(compiled_borrowed.clone())))
         } else {
@@ -907,6 +1017,20 @@ impl<'info> Evaluator {
         env: &HashMap<Vec<u8>, Rc<BodyForm>>,
         only_inline: bool,
     ) -> Result<Rc<BodyForm>, CompileErr> {
+        for ext in self.extensions.iter() {
+            if let Some(res) = ext.try_eval(
+                self,
+                prog_args.clone(),
+                env,
+                &call.loc,
+                call.name,
+                arguments_to_convert,
+                call.original.clone(),
+            )? {
+                return Ok(res);
+            }
+        }
+
         let helper = select_helper(&self.helpers, call.name);
         match helper {
             Some(HelperForm::Defmacro(mac)) => {
@@ -1259,6 +1383,7 @@ impl<'info> Evaluator {
             self.prims.clone(),
             prim,
             args,
+            Some(self),
             Some(PRIM_RUN_LIMIT),
         )
         .map_err(|e| match e {
@@ -1282,7 +1407,7 @@ impl<'info> Evaluator {
         // primitive.
         let updated_opts = self
             .opts
-            .set_stdenv(!in_defun)
+            .set_stdenv(!in_defun && !self.opts.dialect().strict)
             .set_in_defun(in_defun)
             .set_frontend_opt(false);
 
@@ -1304,6 +1429,10 @@ impl<'info> Evaluator {
             }
         }
         self.helpers.push(h.clone());
+    }
+
+    pub fn add_extension(&mut self, e: Rc<dyn EvalExtension>) {
+        self.extensions.push(e);
     }
 
     // The evaluator treats the forms coming up from constants as live.
