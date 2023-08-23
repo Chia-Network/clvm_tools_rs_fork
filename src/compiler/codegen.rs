@@ -1225,33 +1225,13 @@ fn start_codegen(
             // we're looking for defconstants, and defmacros at this step
             HelperForm::Defconstant(defc) => match defc.kind {
                 ConstantKind::Simple => {
-                    let expand_program = SExp::Cons(  // creates: (mod () (q . *body*))
-                        defc.loc.clone(),
-                        Rc::new(SExp::Atom(defc.loc.clone(), "mod".as_bytes().to_vec())),
-                        Rc::new(SExp::Cons(
-                            defc.loc.clone(),
-                            Rc::new(SExp::Nil(defc.loc.clone())),
-                            Rc::new(SExp::Cons(
-                                defc.loc.clone(),
-                                Rc::new(primquote(defc.loc.clone(), defc.body.to_sexp())),
-                                Rc::new(SExp::Nil(defc.loc.clone())),
-                            )),
-                        )),
-                    );
                     let updated_opts = opts.set_code_generator(code_generator.clone());
                     let runner = context.runner();
-                    // call compiler::compile_program, which calls compiler::compile_pre_forms
-                    let code = updated_opts.compile_program(
-                        context.allocator(),
-                        runner.clone(),
-                        Rc::new(expand_program),
-                        &mut HashMap::new(),
-                    )?;  // (q . *body*)
                     run(  // evaluate constant using current context and runner
                         context.allocator(),
                         runner,
                         opts.prim_map(),
-                        Rc::new(code),
+                        Rc::new(primquote(defc.loc.clone(), defc.body.to_sexp())),
                         Rc::new(SExp::Nil(defc.loc.clone())),
                         None,
                         Some(CONST_EVAL_LIMIT),
