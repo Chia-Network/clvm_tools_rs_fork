@@ -450,7 +450,7 @@ pub fn get_call_name(l: Srcloc, body: BodyForm) -> Result<Rc<SExp>, CompileErr> 
     ))
 }
 
-fn compile_call(
+fn compile_callable(
     context: &mut BasicCompileContext,
     l: Srcloc,
     opts: Rc<dyn CompilerOpts>,
@@ -733,7 +733,7 @@ pub fn generate_expr_code(
                 ))
             } else {
                 // look up the name of the callable
-                compile_call(context, l.clone(), opts, compiler, list.to_vec())
+                compile_callable(context, l.clone(), opts, compiler, list.to_vec())
             }
         }
         BodyForm::Mod(_, program) => do_mod_codegen(context, opts, program),
