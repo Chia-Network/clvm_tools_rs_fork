@@ -145,6 +145,7 @@ fn compute_env_shape(l: Srcloc, args: Rc<SExp>, helpers: &[HelperForm]) -> SExp 
     SExp::Cons(l, Rc::new(car), cdr)
 }
 
+// map name to variable/constant in the environment
 fn create_name_lookup_(
     l: Srcloc,
     name: &[u8],
@@ -174,7 +175,7 @@ fn create_name_lookup_(
                 Err(CompileErr(
                     l.clone(),
                     format!(
-                        "{} not found (via {})",
+                        "{} not found (via {})",  // TODO: in what situation would we not find a number?
                         decode_string(name),
                         decode_string(&a)
                     ),
@@ -305,6 +306,8 @@ fn get_prim(loc: Srcloc, prims: Rc<HashMap<Vec<u8>, Rc<SExp>>>, name: &[u8]) -> 
     None
 }
 
+
+// This is the function that maps a name to a macro/defun/inline
 pub fn get_callable(
     _opts: Rc<dyn CompilerOpts>,
     compiler: &PrimaryCodegen,
@@ -383,6 +386,8 @@ pub fn process_macro_call(
     .and_then(|body| generate_expr_code(context, opts, compiler, Rc::new(body)))
 }
 
+
+// this function creates the args for a function call
 fn generate_args_code(
     context: &mut BasicCompileContext,
     opts: Rc<dyn CompilerOpts>,
@@ -396,7 +401,7 @@ fn generate_args_code(
         let mut compiled_args: Vec<Rc<SExp>> = Vec::new();
         for hd in list.iter() {
             let generated =
-                generate_expr_code(context, opts.clone(), compiler, hd.clone()).map(|x| x.1)?;
+                generate_expr_code(context, opts.clone(), compiler, hd.clone()).map(|x| x.1)?;  // if an arg needs processing, process it
             compiled_args.push(generated);
         }
         Ok(list_to_cons(l, &compiled_args))
@@ -419,7 +424,7 @@ fn process_defun_call(
 ) -> Result<CompiledCode, CompileErr> {
     let env = primcons(
         l.clone(),
-        Rc::new(SExp::Integer(l.clone(), 2_u32.to_bigint().unwrap())),
+        Rc::new(SExp::Integer(l.clone(), 2_u32.to_bigint().unwrap())),  // (a body args)
         cons_up(args),
     );
     Ok(CompiledCode(
@@ -466,15 +471,15 @@ fn compile_call(
     ));
 
     let runner = context.runner();
-    let compile_atom_head = |al: Srcloc, an: &Vec<u8>| {
-        let tl = list.iter().skip(1).cloned().collect();
+    let compile_atom_head = |atom_loc: Srcloc, callable_name: &Vec<u8>| {  // compile_atom_head is defined here with captures, similar to a function
+        let tl = list.iter().skip(1).cloned().collect();  // this is the Bodyform that's being compiled
         get_callable(
             opts.clone(),
             compiler,
             l.clone(),
-            Rc::new(SExp::Atom(al.clone(), an.to_vec())),
+            Rc::new(SExp::Atom(atom_loc.clone(), callable_name.to_vec())),
         )
-        .and_then(|calltype| match calltype {
+        .and_then(|calltype| match calltype {  // match depending on callable type
             Callable::CallMacro(l, code) => {
                 process_macro_call(context, opts.clone(), compiler, l, tl, Rc::new(code))
             }
@@ -485,13 +490,13 @@ fn compile_call(
 
             Callable::CallDefun(l, lookup) => {
                 generate_args_code(context, opts.clone(), compiler, l.clone(), &tl).and_then(
-                    |args| {
+                    |args| {  // generate args and then call process_defun_call with the args list
                         process_defun_call(
                             opts.clone(),
                             compiler,
                             l.clone(),
-                            Rc::new(args),
-                            Rc::new(lookup),
+                            Rc::new(args),  // args list that we just calculated
+                            Rc::new(lookup),  // function that we looked_up with get_callable
                         )
                     },
                 )
@@ -514,13 +519,13 @@ fn compile_call(
                             Rc::new(SExp::Integer(l.clone(), i.clone())),
                         )),
                         _ => Err(CompileErr(
-                            al.clone(),
+                            atom_loc.clone(),
                             "@ form only accepts integers at present".to_string(),
                         )),
                     }
                 } else {
                     Err(CompileErr(
-                        al.clone(),
+                        atom_loc.clone(),
                         "@ form accepts one argument".to_string(),
                     ))
                 }
@@ -638,6 +643,7 @@ pub fn generate_expr_code(
         BodyForm::Let(LetFormKind::Parallel, letdata) => {
             /* Depends on a defun having been desugared from this let and the let
             expressing rewritten. */
+            // compile the LetData
             generate_expr_code(context, opts, compiler, letdata.body.clone())
         }
         BodyForm::Quoted(q) => {
@@ -656,6 +662,7 @@ pub fn generate_expr_code(
                             Rc::new(SExp::Integer(l.clone(), bi_one())),
                         ))
                     } else {
+                        // name lookup is for values
                         create_name_lookup(compiler, l.clone(), atom, true)
                             .map(|f| Ok(CompiledCode(l.clone(), f)))
                             .unwrap_or_else(|_| {
@@ -725,6 +732,7 @@ pub fn generate_expr_code(
                     "created a call with no forms".to_string(),
                 ))
             } else {
+                // look up the name of the callable
                 compile_call(context, l.clone(), opts, compiler, list.to_vec())
             }
         }
@@ -915,10 +923,7 @@ fn generate_let_defun(
     )
 }
 
-// fn generate_let_args(blist: Vec<Rc<Binding>>) -> Vec<Rc<BodyForm>> {
-//     blist.iter().map(|b| b.body.clone()).collect()  // return a vec of bodys from a vec of bindings
-// }
-
+// this function turns an (assign ) statement into a Parallel Let BodyForm and returns it
 pub fn hoist_assign_form(letdata: &LetData) -> Result<BodyForm, CompileErr> {
     // Topological sort of bindings.
     let sorted_spec = toposort(
@@ -1047,7 +1052,7 @@ pub fn hoist_body_let_binding(
                 ))
             };
 
-            hoist_body_let_binding(  // recursively call self with the rest of the let expression
+            hoist_body_let_binding(  // recursively call self with the new sub expression
                 outer_context,
                 args,
                 Rc::new(BodyForm::Let(
@@ -1090,15 +1095,13 @@ pub fn hoist_body_let_binding(
             );
             out_defuns.push(generated_defun);  // add defun to output vec
 
-            // let mut let_args = generate_let_args(revised_bindings.to_vec());  // extract bodys from forms
-
             let pass_env = outer_context
                 .map(create_let_env_expression)  // maps outer_context using the create_let_env_expression function
                 .unwrap_or_else(|| {
                     BodyForm::Call(
                         letdata.loc.clone(),  //srcloc
                         vec![
-                            Rc::new(BodyForm::Value(SExp::Atom(
+                            Rc::new(BodyForm::Value(SExp::Atom(  // (r @*env*) is the non-function part of the environment
                                 letdata.loc.clone(),
                                 "r".as_bytes().to_vec(),
                             ))),
@@ -1172,17 +1175,15 @@ pub fn process_helper_let_bindings(helpers: &[HelperForm]) -> Result<Vec<HelperF
     let mut i = 0;
 
     while i < result.len() {
-        match result[i].clone() {
+        match result[i].clone() {  // looping over the list while also populating it
             HelperForm::Defun(inline, defun_data) => {
                 let context = if inline {
                     Some(defun_data.args.clone())
                 } else {
                     None  // inline functions have no additional arguments / context
                 };
-                let helper_result =
+                let (hoisted_helpers, hoisted_body) =
                     hoist_body_let_binding(context, defun_data.args.clone(), defun_data.body.clone())?;
-                let hoisted_helpers = helper_result.0;
-                let hoisted_body = helper_result.1.clone();
 
                 result[i] = HelperForm::Defun(
                     inline,
@@ -1194,8 +1195,8 @@ pub fn process_helper_let_bindings(helpers: &[HelperForm]) -> Result<Vec<HelperF
 
                 i += 1;
 
-                for (j, hh) in hoisted_helpers.iter().enumerate() {
-                    result.insert(i + j, hh.clone());
+                for (j, hh) in hoisted_helpers.iter().enumerate() {  // populate the list while we're looping it
+                    result.insert(i + j, hh.clone());  // place new entries in front of current location
                 }
             }
             _ => {
@@ -1231,7 +1232,7 @@ fn start_codegen(
                         context.allocator(),
                         runner,
                         opts.prim_map(),
-                        Rc::new(primquote(defc.loc.clone(), defc.body.to_sexp())),
+                        Rc::new(primquote(defc.loc.clone(), defc.body.to_sexp())),  // (q . *body*)
                         Rc::new(SExp::Nil(defc.loc.clone())),
                         None,
                         Some(CONST_EVAL_LIMIT),
@@ -1353,6 +1354,7 @@ fn final_codegen(
     let opt_final_expr = context.pre_final_codegen_optimize(opts.clone(), compiler)?;
 
     let optimizer_opts = opts.clone();
+    // Turns BodyForms into full code
     generate_expr_code(context, opts, compiler, opt_final_expr).and_then(|code| {
         let mut final_comp = compiler.clone();
         let optimized_code =
