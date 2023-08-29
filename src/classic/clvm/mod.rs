@@ -242,6 +242,11 @@ const KW_PAIRS: [KwAtomPair; 46] = [
         version: 1,
     },
     KwAtomPair {
+        v: &[0x3c],
+        n: "modpow",
+        version: 1,
+    },
+    KwAtomPair {
         v: &[0x13, 0xd6, 0x1f, 0x00],
         n: "secp256k1_verify",
         version: 1,
