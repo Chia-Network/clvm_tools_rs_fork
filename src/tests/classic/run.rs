@@ -88,25 +88,25 @@ fn brun_y_1_test() {
             )
         ).trim(),
         indoc! {"0x375f00
-            
+
             (\"fact\" 10) => 0x375f00
-            
+
             (\"fact\" 9) => 0x058980
-            
+
             (\"fact\" 8) => 0x009d80
-            
+
             (\"fact\" 7) => 5040
-            
+
             (\"fact\" 6) => 720
-            
+
             (\"fact\" 5) => 120
-            
+
             (\"fact\" 4) => 24
-            
+
             (\"fact\" 3) => 6
-            
+
             (\"fact\" 2) => 2
-            
+
             (\"fact\" 1) => 1"}
     );
 }
@@ -121,23 +121,23 @@ fn brun_v_test() {
         ))
         .trim(),
         indoc! {"8
-            
+
             (a 2 3) [((a (q 16 (q . 3) (q . 5)) 1))] => 8
-            
+
             3 [((a (q 16 (q . 3) (q . 5)) 1))] => ()
-            
+
             2 [((a (q 16 (q . 3) (q . 5)) 1))] => (a (q 16 (q . 3) (q . 5)) 1)
-            
+
             (a (q 16 (q . 3) (q . 5)) 1) [()] => 8
-            
+
             1 [()] => ()
-            
+
             (q 16 (q . 3) (q . 5)) [()] => (+ (q . 3) (q . 5))
-            
+
             (+ (q . 3) (q . 5)) [()] => 8
-            
+
             (q . 5) [()] => 5
-            
+
             (q . 3) [()] => 3"}
     );
 }
@@ -2572,4 +2572,24 @@ fn test_classic_obeys_operator_choice_at_compile_time_version_0() {
     .trim()
     .to_string();
     assert_eq!(compiled, "FAIL: unimplemented operator 48");
+}
+
+#[test]
+fn test_op_mod_modern() {
+    let program = "(mod (S) (include *standard-cl-21*) (% 101 S))";
+    let compiled = do_basic_run(&vec!["run".to_string(), program.to_string()]);
+    let output = do_basic_brun(&vec!["brun".to_string(), compiled, "(10)".to_string()])
+        .trim()
+        .to_string();
+    assert_eq!(output, "1");
+}
+
+#[test]
+fn test_op_modpow_modern() {
+    let program = "(mod (S) (include *standard-cl-21*) (modpow 2 4 S))"; // 2^4 % S
+    let compiled = do_basic_run(&vec!["run".to_string(), program.to_string()]);
+    let output = do_basic_brun(&vec!["brun".to_string(), compiled, "(10)".to_string()])
+        .trim()
+        .to_string();
+    assert_eq!(output, "6");
 }
