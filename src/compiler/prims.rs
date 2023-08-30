@@ -199,6 +199,10 @@ pub fn prims() -> Vec<(Vec<u8>, SExp)> {
             "modpow".as_bytes().to_vec(),
             SExp::Integer(primloc.clone(), 60_u32.to_bigint().unwrap()),
         ),
+        (
+            "%".as_bytes().to_vec(),
+            SExp::Integer(primloc.clone(), 61_u32.to_bigint().unwrap()),
+        ),
     ]
 }
 
