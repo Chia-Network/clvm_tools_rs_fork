@@ -25,6 +25,8 @@ use crate::compiler::compiler::{run_optimizer, DefaultCompilerOpts};
 use crate::compiler::comptypes::{CompileErr, CompilerOpts};
 use crate::compiler::dialect::detect_modern;
 use crate::compiler::runtypes::RunFailure;
+use crate::compiler::srcloc::Srcloc;
+use crate::compiler::untype::untype_code;
 
 pub fn write_sym_output(
     compiled_lookup: &HashMap<String, String>,
@@ -48,6 +50,7 @@ pub fn compile_clvm_text(
 ) -> Result<NodePtr, EvalErr> {
     let ir_src = read_ir(text).map_err(|s| EvalErr(allocator.null(), s.to_string()))?;
     let assembled_sexp = assemble_from_ir(allocator, Rc::new(ir_src))?;
+    let untyped_sexp = untype_code(allocator, Srcloc::start(input_path), assembled_sexp)?;
 
     let dialect = detect_modern(allocator, assembled_sexp);
     // Now the stepping is optional (None for classic) but we may communicate
@@ -68,7 +71,7 @@ pub fn compile_clvm_text(
         .map_err(|s| EvalErr(allocator.null(), s.1))
     } else {
         let compile_invoke_code = run(allocator);
-        let input_sexp = allocator.new_pair(assembled_sexp, allocator.null())?;
+        let input_sexp = allocator.new_pair(untyped_sexp, allocator.null())?;
         let run_program = run_program_for_search_paths(input_path, &opts.get_search_paths(), false);
         if classic_with_opts {
             run_program.set_compiler_opts(Some(opts));

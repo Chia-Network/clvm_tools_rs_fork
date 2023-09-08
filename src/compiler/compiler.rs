@@ -57,6 +57,13 @@ lazy_static! {
                             (compile-list ARGS)
                     )
             (defun-inline / (A B) (f (divmod A B)))
+            (defun-inline c* (A B) (c A B))
+            (defun-inline a* (A B) (a A B))
+            (defun-inline coerce (X) : (Any -> Any) X)
+            (defun-inline explode (X) : (forall a ((Exec a) -> a)) X)
+            (defun-inline bless (X) : (forall a ((Pair a Unit) -> (Exec a))) (coerce X))
+            (defun-inline lift (X V) : (forall a (forall b ((Pair (Exec a) (Pair b Unit)) -> (Exec (Pair a b))))) (coerce X))
+            (defun-inline unlift (X) : (forall a (forall b ((Pair (Exec (Pair a b)) Unit) -> (Exec b)))) (coerce X))
             )
             "}
         .to_string()
@@ -122,6 +129,7 @@ fn fe_opt(
                         args: defun.args.clone(),
                         orig_args: defun.orig_args.clone(),
                         body: body_rc.clone(),
+                        ty: defun.ty.clone(),
                     },
                 );
                 optimized_helpers.push(new_helper);
@@ -148,6 +156,7 @@ fn fe_opt(
         args: compileform.args,
         helpers: optimized_helpers.clone(),
         exp: shrunk,
+        ty: None,
     })
 }
 
@@ -184,6 +193,7 @@ pub fn compile_pre_forms(
         args: p1.args,
         helpers: combined_helpers,
         exp: expr,
+        ty: p1.ty,
     };
 
     // generate code from AST, optionally with optimization

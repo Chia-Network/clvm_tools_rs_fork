@@ -2,9 +2,8 @@ use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use num_bigint::ToBigInt;
-
 use clvm_rs::allocator::Allocator;
+use num_bigint::ToBigInt;
 
 use crate::classic::clvm::__type_compatibility__::{bi_one, bi_zero};
 use crate::classic::clvm_tools::stages::stage_0::TRunProgram;
@@ -24,7 +23,7 @@ use crate::compiler::stackvisit::{HasDepthLimit, VisitedMarker};
 use crate::util::{number_from_u8, u8_from_number, Number};
 
 const PRIM_RUN_LIMIT: usize = 1000000;
-pub const EVAL_STACK_LIMIT: usize = 200;
+pub const EVAL_STACK_LIMIT: usize = 100;
 
 // Stack depth checker.
 #[derive(Clone, Debug, Default)]
@@ -94,6 +93,7 @@ pub struct Evaluator {
     helpers: Vec<HelperForm>,
     mash_conditions: bool,
     ignore_exn: bool,
+    disable_calls: bool,
 }
 
 fn select_helper(bindings: &[HelperForm], name: &[u8]) -> Option<HelperForm> {
@@ -328,7 +328,7 @@ fn arg_inputs_primitive(arginputs: Rc<ArgInputs>) -> bool {
     }
 }
 
-fn build_argument_captures(
+pub fn build_argument_captures(
     l: &Srcloc,
     arguments_to_convert: &[Rc<BodyForm>],
     tail: Option<Rc<BodyForm>>,
@@ -664,6 +664,31 @@ impl<'info> Evaluator {
             helpers,
             mash_conditions: false,
             ignore_exn: false,
+            disable_calls: false,
+        }
+    }
+
+    pub fn disable_calls(&self) -> Self {
+        Evaluator {
+            opts: self.opts.clone(),
+            runner: self.runner.clone(),
+            prims: self.prims.clone(),
+            helpers: self.helpers.clone(),
+            mash_conditions: false,
+            ignore_exn: true,
+            disable_calls: true,
+        }
+    }
+
+    pub fn enable_calls_for_macro(&self) -> Self {
+        Evaluator {
+            opts: self.opts.clone(),
+            runner: self.runner.clone(),
+            prims: self.prims.clone(),
+            helpers: self.helpers.clone(),
+            mash_conditions: false,
+            ignore_exn: true,
+            disable_calls: false,
         }
     }
 
@@ -675,6 +700,7 @@ impl<'info> Evaluator {
             helpers: self.helpers.clone(),
             mash_conditions: true,
             ignore_exn: true,
+            disable_calls: false,
         }
     }
 
@@ -966,6 +992,7 @@ impl<'info> Evaluator {
         &self,
         allocator: &mut Allocator,
         visited: &'_ mut VisitedMarker<'info, VisitedInfo>,
+        head_expr: Rc<BodyForm>,
         call: &CallSpec,
         prog_args: Rc<SExp>,
         arguments_to_convert: &[Rc<BodyForm>],
@@ -995,6 +1022,39 @@ impl<'info> Evaluator {
             Some(HelperForm::Defun(inline, defun)) => {
                 if !inline && only_inline {
                     return Ok(call.original.clone());
+                }
+
+                if self.disable_calls {
+                    let mut call_vec = vec![head_expr];
+                    for a in arguments_to_convert.iter() {
+                        call_vec.push(self.shrink_bodyform_visited(
+                            allocator,
+                            visited,
+                            prog_args.clone(),
+                            env,
+                            a.clone(),
+                            only_inline,
+                        )?);
+                    }
+
+                    let converted_tail = if let Some(t) = call.tail.as_ref() {
+                        Some(self.shrink_bodyform_visited(
+                            allocator,
+                            visited,
+                            prog_args,
+                            env,
+                            t.clone(),
+                            only_inline,
+                        )?)
+                    } else {
+                        None
+                    };
+
+                    return Ok(Rc::new(BodyForm::Call(
+                        call.loc.clone(),
+                        call_vec,
+                        converted_tail,
+                    )));
                 }
 
                 let argument_captures_untranslated = build_argument_captures(
@@ -1179,6 +1239,8 @@ impl<'info> Evaluator {
                     ));
                 }
 
+                // Allow us to punt all calls to functions, which preserved type
+                // signatures for type checking.
                 let head_expr = parts[0].clone();
                 let arguments_to_convert: Vec<Rc<BodyForm>> =
                     parts.iter().skip(1).cloned().collect();
@@ -1187,6 +1249,7 @@ impl<'info> Evaluator {
                     BodyForm::Value(SExp::Atom(_call_loc, call_name)) => self.handle_invoke(
                         allocator,
                         &mut visited,
+                        head_expr.clone(),
                         &CallSpec {
                             loc: l.clone(),
                             name: call_name,
@@ -1202,6 +1265,7 @@ impl<'info> Evaluator {
                     BodyForm::Value(SExp::Integer(_call_loc, call_int)) => self.handle_invoke(
                         allocator,
                         &mut visited,
+                        head_expr.clone(),
                         &CallSpec {
                             loc: l.clone(),
                             name: &u8_from_number(call_int.clone()),
